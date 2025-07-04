@@ -1,25 +1,49 @@
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import Header from '../../../../components/Header';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { Button } from 'react-native-paper';
+import { Button, Card } from 'react-native-paper';
+import { Entry } from '../../../../types/Entry';
+import { entryApi } from '../../../../services/entryApi';
+import { useEntriesStore } from '../../../../store/useEntriesStore';
 
 export default function ActivityDetails() {
-    const { id } = useLocalSearchParams();
-    const [entry, setEntry] = useState<any>(null);
+    const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { fetchEntries } = useEntriesStore();
+
+    const [entry, setEntry] = useState<Entry | null>(null);
 
     useEffect(() => {
-        const loadEntry = async () => {
-            const stored = await AsyncStorage.getItem('entries');
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                setEntry(parsed[Number(id)]);
+        const load = async () => {
+            try {
+                const data = await entryApi.getOne(Number(id));
+                if (!data) throw new Error();
+                setEntry(data);
+            } catch {
+                Alert.alert('Błąd ładowania wpisu');
+                router.replace('/(drawer)/activities');
             }
         };
-        loadEntry();
+        load();
     }, [id]);
+
+    const handleDelete = async () => {
+        Alert.alert('Potwierdzenie', 'Czy na pewno chcesz usunąć ten wpis?', [
+            { text: 'Anuluj', style: 'cancel' },
+            {
+                text: 'Usuń', style: 'destructive', onPress: async () => {
+                    try {
+                        await entryApi.delete(Number(id));
+                        await fetchEntries();
+                        router.replace('/(drawer)/activities');
+                    } catch {
+                        Alert.alert('Błąd podczas usuwania');
+                    }
+                }
+            }
+        ]);
+    };
 
     const getMoodEmoji = (mood: string) => {
         if (mood?.includes('zadowolony')) return '😀';
@@ -36,55 +60,70 @@ export default function ActivityDetails() {
         }
     };
 
-    const handleDelete = async () => {
-        Alert.alert('Potwierdzenie', 'Czy na pewno chcesz usunąć ten wpis?', [
-            {
-                text: 'Anuluj',
-                style: 'cancel',
-            },
-            {
-                text: 'Usuń',
-                style: 'destructive',
-                onPress: async () => {
-                    const stored = await AsyncStorage.getItem('entries');
-                    if (stored) {
-                        const parsed = JSON.parse(stored);
-                        parsed.splice(Number(id), 1);
-                        await AsyncStorage.setItem('entries', JSON.stringify(parsed));
-                        router.replace('/(drawer)/activities');
-                    }
-                },
-            },
-        ]);
-    };
-
     if (!entry) return <View style={styles.container}><Text>Wczytywanie...</Text></View>;
 
     return (
         <View style={styles.container}>
             <Header title="Szczegóły aktywności" />
-            <Text style={styles.title}>{entry.activity} {getEffortEmoji(entry.effort)}</Text>
-            {entry.description ? <Text style={styles.description}>{entry.description}</Text> : null}
-            <Text style={styles.label}>Samopoczucie: {getMoodEmoji(entry.mood)} {entry.mood}</Text>
-            <Text style={styles.label}>Wysiłek: {getEffortEmoji(entry.effort)} {entry.effort}</Text>
-            <Text style={styles.date}>Data: {new Date(entry.date).toLocaleString()}</Text>
 
-            <View style={{ marginTop: 24, gap: 12 }}>
+            <Card style={styles.card}>
+                <Card.Title
+                    title={`${entry.activity} ${getEffortEmoji(entry.effort)}`}
+                    titleStyle={styles.title}
+                />
+                <Card.Content>
+                    {entry.description ? (
+                        <Text style={styles.description}>{entry.description}</Text>
+                    ) : null}
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Samopoczucie:</Text>
+                        <Text style={styles.value}>{getMoodEmoji(entry.mood)} {entry.mood}</Text>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Wysiłek:</Text>
+                        <Text style={styles.value}>{getEffortEmoji(entry.effort)} {entry.effort}</Text>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Typ:</Text>
+                        <Text style={styles.value}>{entry.type}</Text>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Czas trwania:</Text>
+                        <Text style={styles.value}>{entry.duration} minut</Text>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Liczba kroków:</Text>
+                        <Text style={styles.value}>{entry.steps}</Text>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Text style={styles.label}>Data:</Text>
+                        <Text style={styles.value}>{new Date(entry.date).toLocaleString()}</Text>
+                    </View>
+                </Card.Content>
+            </Card>
+
+            <View style={styles.buttons}>
                 <Button
                     mode="outlined"
-                    onPress={() => {
+                    onPress={() =>
                         router.push({
                             pathname: '/(drawer)/activity/[id]/edit',
                             params: { id: String(id) },
-                        });
-                    }}
+                        })
+                    }
                 >
                     ✏️ Edytuj wpis
                 </Button>
                 <Button
                     mode="contained"
-                    buttonColor="red"
-                    textColor="white"
+                    buttonColor="#e53935"
+                    textColor="#fff"
                     onPress={handleDelete}
                 >
                     🗑 Usuń wpis
@@ -100,26 +139,37 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         flex: 1,
     },
+    card: {
+        marginBottom: 24,
+        paddingBottom: 8,
+    },
     title: {
         fontSize: 20,
         fontWeight: 'bold',
-        marginBottom: 12,
     },
     description: {
         fontSize: 16,
-        marginBottom: 12,
+        marginBottom: 16,
         color: '#555',
     },
-    label: {
-        fontSize: 16,
-        marginBottom: 8,
+    section: {
+        marginBottom: 12,
     },
-    date: {
+    label: {
         fontSize: 14,
-        color: '#888',
-        marginTop: 12,
+        fontWeight: '600',
+        color: '#777',
+    },
+    value: {
+        fontSize: 16,
+        color: '#222',
+        marginTop: 2,
+    },
+    buttons: {
+        gap: 12,
     },
 });
+
 export const options = {
     drawerItemStyle: { display: 'none' },
     drawerLabel: () => null,

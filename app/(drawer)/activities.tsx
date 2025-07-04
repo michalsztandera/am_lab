@@ -1,16 +1,14 @@
-// Dodano: usuwanie i edycja aktywności
-// UWAGA: dodaj nowy plik: app/(drawer)/activity/[id]/edit.tsx
-
 import { View, Text, StyleSheet, FlatList, Pressable, Alert } from 'react-native';
 import Header from '../../components/Header';
 import { useFocusEffect, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
 import { Button, Menu, Divider, IconButton } from 'react-native-paper';
+import { useEntriesStore } from '../../store/useEntriesStore';
+import { Entry } from '../../types/Entry';
 
 export default function ActivitiesScreen() {
-    const [entries, setEntries] = useState<any[]>([]);
-    const [filtered, setFiltered] = useState<any[]>([]);
+    const { entries, fetchEntries, deleteEntry } = useEntriesStore();
+    const [filtered, setFiltered] = useState<Entry[]>([]);
     const [sortDesc, setSortDesc] = useState(true);
     const [filterMood, setFilterMood] = useState('');
     const [menuVisible, setMenuVisible] = useState(false);
@@ -18,25 +16,20 @@ export default function ActivitiesScreen() {
 
     useFocusEffect(
         useCallback(() => {
-            const fetchEntries = async () => {
-                const stored = await AsyncStorage.getItem('entries');
-                if (stored) {
-                    const data = JSON.parse(stored);
-                    setEntries(data);
-                    applyFilter(data, filterMood, sortDesc);
-                } else {
-                    setEntries([]);
-                    setFiltered([]);
-                }
-            };
             fetchEntries();
-        }, [sortDesc, filterMood])
+        }, [])
     );
 
-    const applyFilter = (list: any[], mood: string, desc: boolean) => {
+    useFocusEffect(
+        useCallback(() => {
+            applyFilter(entries, filterMood, sortDesc);
+        }, [entries, filterMood, sortDesc])
+    );
+
+    const applyFilter = (list: Entry[], mood: string, desc: boolean) => {
         let result = [...list];
         if (mood) {
-            result = result.filter((entry) =>
+            result = result.filter(entry =>
                 entry.mood.toLowerCase().includes(mood.toLowerCase())
             );
         }
@@ -63,16 +56,17 @@ export default function ActivitiesScreen() {
         }
     };
 
-    const handleDelete = async (index: number) => {
+    const handleDelete = (id: number) => {
         Alert.alert('Usuń wpis', 'Czy na pewno chcesz usunąć ten wpis?', [
             { text: 'Anuluj', style: 'cancel' },
             {
                 text: 'Usuń', style: 'destructive', onPress: async () => {
-                    const updated = [...entries];
-                    updated.splice(index, 1);
-                    await AsyncStorage.setItem('entries', JSON.stringify(updated));
-                    setEntries(updated);
-                    applyFilter(updated, filterMood, sortDesc);
+                    try {
+                        await deleteEntry(id);
+                        await fetchEntries();
+                    } catch {
+                        Alert.alert('Błąd podczas usuwania wpisu');
+                    }
                 }
             }
         ]);
@@ -85,7 +79,7 @@ export default function ActivitiesScreen() {
             <View style={styles.controls}>
                 <Button
                     mode="outlined"
-                    onPress={() => setSortDesc((prev) => !prev)}
+                    onPress={() => setSortDesc(prev => !prev)}
                     style={styles.controlButton}
                 >
                     Sortuj: {sortDesc ? 'Najnowsze' : 'Najstarsze'}
@@ -109,21 +103,36 @@ export default function ActivitiesScreen() {
 
             <FlatList
                 data={filtered}
-                keyExtractor={(_, index) => index.toString()}
+                keyExtractor={(item) => item.id.toString()}
                 contentContainerStyle={{ paddingBottom: 60 }}
-                renderItem={({ item, index }) => (
-                    <Pressable onPress={() => router.push(`/(drawer)/activity/${index}` as any)}>
+                renderItem={({ item }) => (
+                    <Pressable onPress={() => router.push(`/(drawer)/activity/${item.id}` as any)}>
                         <View style={styles.item}>
                             <View style={styles.itemHeader}>
-                                <Text style={styles.activity}>{item.activity} {getEffortEmoji(item.effort)}</Text>
+                                <Text style={styles.activity}>
+                                    {item.activity} {getEffortEmoji(item.effort)}
+                                </Text>
                                 <View style={{ flexDirection: 'row' }}>
-                                    <IconButton icon="pencil" size={18} onPress={() => router.push(`/(drawer)/activity/${index}/edit` as any)} />
-                                    <IconButton icon="delete" size={18} onPress={() => handleDelete(index)} />
+                                    <IconButton icon="pencil" size={18} onPress={() => router.push(`/(drawer)/activity/${item.id}/edit` as any)} />
+                                    <IconButton icon="delete" size={18} onPress={() => handleDelete(item.id)} />
                                 </View>
                             </View>
-                            {item.description ? <Text style={styles.description}>{item.description}</Text> : null}
+
+                            {item.description ? (
+                                <Text style={styles.description}>{item.description}</Text>
+                            ) : null}
+
+                            <View style={styles.rowDetails}>
+                                <Text style={styles.detail}>📆 {new Date(item.date).toLocaleString()}</Text>
+                                <Text style={styles.detail}>🏷️ Typ: {item.type}</Text>
+                            </View>
+
+                            <View style={styles.rowDetails}>
+                                <Text style={styles.detail}>⏱️ Czas: {item.duration} min</Text>
+                                <Text style={styles.detail}>👣 Kroki: {item.steps}</Text>
+                            </View>
+
                             <Text style={styles.mood}>{getMoodEmoji(item.mood)} {item.mood}</Text>
-                            <Text style={styles.date}>{new Date(item.date).toLocaleString()}</Text>
                         </View>
                     </Pressable>
                 )}
@@ -164,24 +173,34 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        marginBottom: 8,
     },
     activity: {
         fontSize: 18,
         fontWeight: '600',
-        marginBottom: 4,
     },
     description: {
         fontSize: 15,
         color: '#444',
-        marginBottom: 4,
+        marginBottom: 6,
     },
     mood: {
         fontSize: 15,
-        marginBottom: 2,
+        marginTop: 6,
     },
     date: {
         fontSize: 12,
         color: '#999',
+    },
+    detail: {
+        fontSize: 14,
+        color: '#333',
+    },
+    rowDetails: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 4,
+        marginBottom: 4,
     },
     empty: {
         textAlign: 'center',

@@ -8,7 +8,7 @@ export default function Dashboard() {
 
     return (
         <View style={styles.container}>
-            <Header title="Dashboard" />
+            <Header title="Wellness Tracker" />
             <Card style={styles.card}>
                 <Card.Content>
                     <Title>Podsumowanie dnia</Title>
